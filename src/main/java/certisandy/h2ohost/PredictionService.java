@@ -8,6 +8,7 @@ import hex.genmodel.easy.exception.PredictException;
 import hex.genmodel.easy.prediction.AbstractPrediction;
 import hex.genmodel.easy.prediction.BinomialModelPrediction;
 import hex.genmodel.easy.prediction.MultinomialModelPrediction;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.PostConstruct;
@@ -19,15 +20,23 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
 import java.util.logging.Logger;
+import java.util.stream.Collectors;
 
 @Service
 public class PredictionService {
     public static final String WEIGHT_FEATURE = "Weight";
     private static final Logger logger = Logger.getLogger("PredictionService");
     private final Map<String,EasyPredictModelWrapper> models = new HashMap<>();
+    private final Set<String> optionalColumns;
+
+    PredictionService(@Value("${optionalColumns}") String optionalColumnsCsv) {
+        optionalColumns = Arrays.stream(optionalColumnsCsv.split(",")).collect(Collectors.toSet());
+    }
     @PostConstruct
     public void init() throws IOException {
         File f = new File("models/");
+        if(!f.exists())
+            throw new IOException("models directory not found");
         for(File zip : f.listFiles((dir, name) -> name.endsWith(".zip")))
         {
             String name = zip.getName();
@@ -44,8 +53,10 @@ public class PredictionService {
                 .setModel(MojoModel.load(file));
         this.models.put(name,new EasyPredictModelWrapper(config));
     }
-    public static Object fixMissing(String col)
+    public Object fixMissing(String col)
     {
+        if(optionalColumns.contains(col))
+            return null;
         switch (col)
         {
             case "PeerMidDiff":
@@ -65,6 +76,10 @@ public class PredictionService {
                 return 1.0;
             case "EurexPeerBidDiff":
             case "EurexPeerAskDiff":
+            case "MaxUlSpreadRatio":
+            case "PeerQuantileBefore":
+            case "PeerQuantileAfter":
+            case "PeerQuantileChange":
                 return null;
             case "CertiMarket":
                 return "DE";
@@ -79,7 +94,8 @@ public class PredictionService {
             return ((Integer) v).doubleValue();
         return v;
     }
-    public Map<String, List<Double>> multiPredict(String modelName,Map<String,List<Object>> input, boolean calibrated, int n) throws PredictException {
+    public Map<String, List<Double>> multiPredict(String modelName,Map<String,List<Object>> input,
+                                                  boolean calibrated, int n) throws PredictException {
         EasyPredictModelWrapper model = models.get(modelName);
         if(model == null)
             throw new IllegalArgumentException("Unknown model "+modelName);
